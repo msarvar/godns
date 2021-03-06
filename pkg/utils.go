@@ -2,6 +2,8 @@ package pkg
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/pkg/errors"
 )
 
@@ -9,15 +11,24 @@ const (
 	MAX_JUMPS = 5
 )
 
+func BoolToUint8(value bool) uint8 {
+	var converted uint8
+	if value {
+		converted = 1
+	}
+
+	return converted
+}
+
 func NewBytePacketBuffer() *BytePacketBuffer {
 	return &BytePacketBuffer{
-		buf: make([]uint8, 512),
+		Buf: make([]uint8, 512),
 		pos: 0,
 	}
 }
 
 type BytePacketBuffer struct {
-	buf []uint8
+	Buf []uint8
 	pos int
 }
 
@@ -33,12 +44,28 @@ func (b *BytePacketBuffer) Seek(pos int) {
 	b.pos = pos
 }
 
-func (b *BytePacketBuffer) Read() (uint8, error) {
-	if len(b.buf) >= 512 {
+func (b *BytePacketBuffer) Get(pos int) (uint8, error) {
+	if pos >= 512 {
 		return 0, errors.New("End of buffer")
 	}
 
-	res := b.buf[b.pos]
+	return b.Buf[pos], nil
+}
+
+func (b *BytePacketBuffer) GetRange(start int, len int) ([]uint8, error) {
+	if start+len >= 512 {
+		return nil, errors.New("End of buffer")
+	}
+
+	return b.Buf[start : start+len], nil
+}
+
+func (b *BytePacketBuffer) Read() (uint8, error) {
+	if b.pos >= 512 {
+		return 0, errors.New("end of buffer")
+	}
+
+	res := b.Buf[b.pos]
 	b.pos += 1
 
 	return res, nil
@@ -78,23 +105,7 @@ func (b *BytePacketBuffer) Read32() (uint32, error) {
 	return res, nil
 }
 
-func (b *BytePacketBuffer) Get(pos int) (uint8, error) {
-	if pos >= 512 {
-		return 0, errors.New("End of buffer")
-	}
-
-	return b.buf[pos], nil
-}
-
-func (b *BytePacketBuffer) GetRange(start int, len int) ([]uint8, error) {
-	if start+len >= 512 {
-		return nil, errors.New("End of buffer")
-	}
-
-	return b.buf[start:len], nil
-}
-
-func (b *BytePacketBuffer) ReadQname(out []string) error {
+func (b *BytePacketBuffer) ReadQname(outStr *outStr) error {
 	pos := b.Pos()
 
 	jumped := false
@@ -142,12 +153,12 @@ func (b *BytePacketBuffer) ReadQname(out []string) error {
 				break
 			}
 
-			out = append(out, delim)
+			outStr.str = fmt.Sprintf("%s%s", outStr.str, delim)
 			str_buffer, err := b.GetRange(pos, int(len))
 			if err != nil {
 				return errors.Wrap(err, "reading the label")
 			}
-			out = append(out, string(str_buffer))
+			outStr.str = fmt.Sprintf("%s%s", outStr.str, str_buffer)
 
 			delim = "."
 
@@ -157,6 +168,70 @@ func (b *BytePacketBuffer) ReadQname(out []string) error {
 
 	if !jumped {
 		b.Seek(pos)
+	}
+
+	return nil
+}
+
+func (b *BytePacketBuffer) Write(value uint8) error {
+	if b.pos >= 512 {
+		return errors.New("end of buffer")
+	}
+
+	b.Buf[b.pos] = value
+	b.pos += 1
+
+	return nil
+}
+
+func (b *BytePacketBuffer) Write8(value uint8) error {
+	return b.Write(value)
+}
+
+func (b *BytePacketBuffer) Write16(value uint16) error {
+	err := b.Write(uint8(value >> 8))
+	if err != nil {
+		return err
+	}
+
+	return b.Write(uint8(value & 0xFF))
+}
+
+func (b *BytePacketBuffer) Write32(value uint32) error {
+	err := b.Write(uint8((value >> 24) & 0xFF))
+	if err != nil {
+		return err
+	}
+
+	err = b.Write(uint8((value >> 16) & 0xFF))
+	if err != nil {
+		return err
+	}
+
+	err = b.Write(uint8((value >> 8) & 0xFF))
+	if err != nil {
+		return err
+	}
+
+	return b.Write(uint8(value & 0xFF))
+}
+
+func (b *BytePacketBuffer) WriteQname(qname string) error {
+	for _, label := range strings.Split(qname, ".") {
+		len := len(label)
+		if len > 0x3f {
+			return errors.New("single label exceeds 63 character of length")
+		}
+
+		err := b.Write8(uint8(len))
+		if err != nil {
+			return errors.Wrap(err, "writing single label")
+		}
+	}
+
+	err := b.Write8(0)
+	if err != nil {
+		return errors.Wrap(err, "writing last byte")
 	}
 
 	return nil
