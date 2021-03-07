@@ -1,26 +1,19 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net"
-	"os"
-	"time"
 
 	"github.com/msarvar/godns/pkg"
+	"github.com/pkg/errors"
 )
 
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
+func lookup(qname string, qtype pkg.QueryType) (*pkg.DNSPacket, error) {
 	socket := net.Dialer{}
-	conn, err := socket.DialContext(ctx, "udp", "8.8.8.8:53")
-	logAndExitIfErr(ctx, "Failed creating UDP connection: %s", err)
+	conn, err := socket.Dial("udp", "8.8.8.8:53")
+	logAndExitIfErr("Failed creating UDP connection: %s", err)
 
 	defer conn.Close()
-
-	qname := "yahoo.com"
-	qtype := pkg.MXQueryType
 
 	packet := pkg.NewDNSPacket()
 	q := pkg.NewDNSQuestion(qname, qtype)
@@ -32,43 +25,108 @@ func main() {
 
 	reqBuffer := pkg.NewBytePacketBuffer()
 	err = packet.Write(reqBuffer)
-	logAndExitIfErr(ctx, "Failed populating dns packet: %s", err)
+	if err != nil {
+		return nil, errors.Wrap(err, "preparing dns request packet")
+	}
 
 	_, err = conn.Write(reqBuffer.Buf)
-	logAndExitIfErr(ctx, "Failed sending dns request: %s", err)
+	if err != nil {
+		return nil, errors.Wrap(err, "sending dns request")
+	}
 
 	// Receive DNS response
 	resBuffer := pkg.NewBytePacketBuffer()
 
 	_, err = conn.Read(resBuffer.Buf)
-	logAndExitIfErr(ctx, "Failed receiveing dns response: %s", err)
+	if err != nil {
+		return nil, errors.Wrap(err, "reading dns server response")
+	}
 
 	resPacket, err := pkg.DNSPacketFromBuffer(resBuffer)
-	logAndExitIfErr(ctx, "Failed reading response buffer: %s", err)
-
-	fmt.Printf("%+v\n", resPacket.Header)
-
-	for _, q := range resPacket.Questions {
-		fmt.Printf("%+v\n", q)
+	if err != nil {
+		return nil, errors.Wrap(err, "parsing dns server response")
 	}
 
-	for _, r := range resPacket.Answers {
-		fmt.Printf("%+v\n", r)
+	return resPacket, nil
+}
+
+func handleQuery(udpConn net.PacketConn, reqBuffer *pkg.BytePacketBuffer, addr net.Addr) {
+	request, err := pkg.DNSPacketFromBuffer(reqBuffer)
+	logAndExitIfErr("Error: initializing response: %s\n", err)
+
+	packet := pkg.NewDNSPacket()
+	packet.Header.ID = request.Header.ID
+	packet.Header.RecursionDesired = true
+	packet.Header.RecursionAvailable = true
+	packet.Header.Response = true
+
+	// only handling cases where there is 1 question
+	if len(request.Questions) == 1 {
+		q := request.Questions[0]
+		fmt.Println(fmt.Sprintf("Received query: %+v", q))
+
+		result, err := lookup(q.Name.String(), q.QType)
+		if err == nil {
+			packet.Header.Questions = 1
+			packet.Header.ResCode = result.Header.ResCode
+
+			for _, ans := range result.Answers {
+				fmt.Println(fmt.Sprintf("Answer: %+v", ans))
+
+				packet.Answers = append(packet.Answers, ans)
+			}
+
+			for _, auth := range result.Authorities {
+				fmt.Println(fmt.Sprintf("Authority: %+v", auth))
+
+				packet.Authorities = append(packet.Authorities, auth)
+			}
+
+			for _, res := range result.Resources {
+				fmt.Println(fmt.Sprintf("Resource: %+v", res))
+
+				packet.Resources = append(packet.Resources, res)
+			}
+		} else {
+			packet.Header.ResCode = pkg.ServFail
+		}
+	} else {
+		packet.Header.ResCode = pkg.FormErr
 	}
 
-	for _, r := range resPacket.Authorities {
-		fmt.Printf("%+v\n", r)
-	}
+	resBuffer := pkg.NewBytePacketBuffer()
 
-	for _, r := range resPacket.Resources {
-		fmt.Printf("%+v\n", r)
+	err = packet.Write(resBuffer)
+	logAndExitIfErr("Error: generating dns response packet: %s\n", err)
+
+	len := resBuffer.Pos()
+	data, err := resBuffer.GetRange(0, len)
+	logAndExitIfErr("Error: generating dns response packet: %s\n", err)
+
+	_, err = udpConn.WriteTo(data, addr)
+	logAndExitIfErr("Error: sending response: %s\n", err)
+}
+
+func main() {
+	// ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	// defer cancel()
+	udpConn, err := net.ListenPacket("udp", ":2053")
+	logAndExitIfErr("Error: receiving udp request: %s\n", err)
+	defer udpConn.Close()
+
+	for {
+		fmt.Println("Waiting for requests...")
+		reqBuffer := pkg.NewBytePacketBuffer()
+
+		_, addr, err := udpConn.ReadFrom(reqBuffer.Buf)
+		logAndExitIfErr("Error: reading request: %s\n", err)
+
+		handleQuery(udpConn, reqBuffer, addr)
 	}
 }
 
-func logAndExitIfErr(ctx context.Context, msg string, err error) {
+func logAndExitIfErr(msg string, err error) {
 	if err != nil {
 		fmt.Printf(msg, err)
-		ctx.Done()
-		os.Exit(1)
 	}
 }

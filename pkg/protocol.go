@@ -202,7 +202,7 @@ func (q QueryType) String() string {
 	case AAAAQueryType:
 		return "AAAA"
 	default:
-		return "UNKNOWN"
+		return fmt.Sprintf("%v", int(q))
 	}
 }
 
