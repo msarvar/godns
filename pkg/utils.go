@@ -52,6 +52,15 @@ func (b *BytePacketBuffer) Get(pos int) (uint8, error) {
 	return b.Buf[pos], nil
 }
 
+func (b *BytePacketBuffer) Set(pos int, value uint8) {
+	b.Buf[pos] = value
+}
+
+func (b *BytePacketBuffer) Set16(pos int, value uint16) {
+	b.Buf[pos] = uint8(value >> 8)
+	b.Buf[pos+1] = uint8(value & 0xFF)
+}
+
 func (b *BytePacketBuffer) GetRange(start int, len int) ([]uint8, error) {
 	if start+len >= 512 {
 		return nil, errors.New("End of buffer")
@@ -105,7 +114,7 @@ func (b *BytePacketBuffer) Read32() (uint32, error) {
 	return res, nil
 }
 
-func (b *BytePacketBuffer) ReadQname(outStr *outStr) error {
+func (b *BytePacketBuffer) ReadQname(domainName *domainName) error {
 	pos := b.Pos()
 
 	jumped := false
@@ -153,12 +162,12 @@ func (b *BytePacketBuffer) ReadQname(outStr *outStr) error {
 				break
 			}
 
-			outStr.str = fmt.Sprintf("%s%s", outStr.str, delim)
+			domainName.str = fmt.Sprintf("%s%s", domainName.str, delim)
 			str_buffer, err := b.GetRange(pos, int(len))
 			if err != nil {
 				return errors.Wrap(err, "reading the label")
 			}
-			outStr.str = fmt.Sprintf("%s%s", outStr.str, str_buffer)
+			domainName.str = fmt.Sprintf("%s%s", domainName.str, str_buffer)
 
 			delim = "."
 
@@ -173,7 +182,19 @@ func (b *BytePacketBuffer) ReadQname(outStr *outStr) error {
 	return nil
 }
 
-func (b *BytePacketBuffer) Write(value uint8) error {
+func (b *BytePacketBuffer) Write(p []byte) (n int, err error) {
+	for _, byte := range p {
+		pos := b.Pos()
+		err := b.writePacketByte(byte)
+		if err != nil {
+			return b.Pos() - pos, err
+		}
+	}
+
+	return b.Pos(), nil
+}
+
+func (b *BytePacketBuffer) writePacketByte(value uint8) error {
 	if b.pos >= 512 {
 		return errors.New("end of buffer")
 	}
@@ -185,39 +206,39 @@ func (b *BytePacketBuffer) Write(value uint8) error {
 }
 
 func (b *BytePacketBuffer) Write8(value uint8) error {
-	return b.Write(value)
+	return b.writePacketByte(value)
 }
 
 func (b *BytePacketBuffer) Write16(value uint16) error {
-	err := b.Write(uint8(value >> 8))
+	err := b.writePacketByte(uint8(value >> 8))
 	if err != nil {
 		return err
 	}
 
-	return b.Write(uint8(value & 0xFF))
+	return b.writePacketByte(uint8(value & 0xFF))
 }
 
 func (b *BytePacketBuffer) Write32(value uint32) error {
-	err := b.Write(uint8((value >> 24) & 0xFF))
+	err := b.writePacketByte(uint8((value >> 24) & 0xFF))
 	if err != nil {
 		return err
 	}
 
-	err = b.Write(uint8((value >> 16) & 0xFF))
+	err = b.writePacketByte(uint8((value >> 16) & 0xFF))
 	if err != nil {
 		return err
 	}
 
-	err = b.Write(uint8((value >> 8) & 0xFF))
+	err = b.writePacketByte(uint8((value >> 8) & 0xFF))
 	if err != nil {
 		return err
 	}
 
-	return b.Write(uint8(value & 0xFF))
+	return b.writePacketByte(uint8(value & 0xFF))
 }
 
-func (b *BytePacketBuffer) WriteQname(qname string) error {
-	for _, label := range strings.Split(qname, ".") {
+func (b *BytePacketBuffer) WriteQname(qname *domainName) error {
+	for _, label := range strings.Split(qname.str, ".") {
 		len := len(label)
 		if len > 0x3f {
 			return errors.New("single label exceeds 63 character of length")
@@ -226,6 +247,13 @@ func (b *BytePacketBuffer) WriteQname(qname string) error {
 		err := b.Write8(uint8(len))
 		if err != nil {
 			return errors.Wrap(err, "writing single label")
+		}
+
+		for _, bt := range []byte(label) {
+			err = b.Write8(bt)
+			if err != nil {
+				return errors.Wrap(err, "writing domain name")
+			}
 		}
 	}
 
