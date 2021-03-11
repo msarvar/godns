@@ -215,7 +215,12 @@ func (b *BytePacketBuffer) Write16(value uint16) error {
 		return err
 	}
 
-	return b.writePacketByte(uint8(value & 0xFF))
+	err = b.writePacketByte(uint8(value & 0xFF))
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (b *BytePacketBuffer) Write32(value uint32) error {

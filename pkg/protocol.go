@@ -2,7 +2,11 @@ package pkg
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
+	"strings"
+
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -225,6 +229,7 @@ func (n *domainName) String() string {
 
 type DNSQuestion struct {
 	Name  *domainName
+	Class uint16
 	QType QueryType
 }
 
@@ -233,6 +238,7 @@ func NewDNSQuestion(qname string, qtype QueryType) *DNSQuestion {
 		Name: &domainName{
 			str: qname,
 		},
+		Class: 1,
 		QType: qtype,
 	}
 }
@@ -251,10 +257,11 @@ func (q *DNSQuestion) Read(buffer *BytePacketBuffer) error {
 	q.QType = QueryType(i)
 
 	// reading class
-	_, err = buffer.Read16()
+	c, err := buffer.Read16()
 	if err != nil {
 		return errors.Wrap(err, "reading dns question query class")
 	}
+	q.Class = c
 
 	return nil
 }
@@ -271,7 +278,7 @@ func (q *DNSQuestion) Write(buffer *BytePacketBuffer) error {
 	}
 
 	// Class of the DNSQuestion in practise always 1
-	err = buffer.Write16(1)
+	err = buffer.Write16(q.Class)
 	if err != nil {
 		return errors.Wrap(err, "writing query class")
 	}
@@ -283,6 +290,7 @@ type DNSRecord struct {
 	QType    QueryType
 	Domain   *domainName
 	Host     *domainName
+	Class    uint16
 	Priority uint16
 	Addr     net.IP
 	TTL      uint32
@@ -308,10 +316,11 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 
 	r.QType = QueryType(qtype_num)
 
-	_, err = buffer.Read16()
+	class, err := buffer.Read16()
 	if err != nil {
 		return errors.Wrap(err, "reading dns record class")
 	}
+	r.Class = class
 
 	ttl, err := buffer.Read32()
 	if err != nil {
@@ -397,8 +406,6 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 			byte(rawAddr4>>8&0xFF),
 			byte(rawAddr4>>0&0xFF))
 
-		fmt.Println(len(ipv6Addr), net.IPv6len)
-
 		r.Addr = ipv6Addr
 	case MXQueryType:
 		priority, err := buffer.Read16()
@@ -437,7 +444,7 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	}
 
 	// DNS Record Class which always 1
-	err = buffer.Write16(1)
+	err = buffer.Write16(r.Class)
 	if err != nil {
 		return 0, errors.Wrap(err, "writing dns record class")
 	}
@@ -476,7 +483,6 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		}
 	case NSQueryType:
 		pos := buffer.Pos()
-
 		// Setting mock to data len to make sure it bytes are in right order
 		err = buffer.Write16(0)
 		if err != nil {
@@ -557,11 +563,39 @@ type DNSPacket struct {
 
 func NewDNSPacket() *DNSPacket {
 	return &DNSPacket{
-		Header:      NewDNSHeader(),
-		Answers:     make([]*DNSRecord, 0),
-		Authorities: make([]*DNSRecord, 0),
-		Resources:   make([]*DNSRecord, 0),
+		Header: NewDNSHeader(),
 	}
+}
+
+func (p *DNSPacket) String() string {
+
+	qStr := make([]string, 0)
+	for _, q := range p.Questions {
+		qStr = append(qStr, fmt.Sprintf("%+v", q))
+	}
+
+	answers := make([]string, 0)
+	for _, q := range p.Answers {
+		answers = append(answers, fmt.Sprintf("%+v", q))
+	}
+
+	authorities := make([]string, 0)
+	for _, q := range p.Authorities {
+		authorities = append(authorities, fmt.Sprintf("%+v", q))
+	}
+
+	resources := make([]string, 0)
+	for _, q := range p.Resources {
+		resources = append(resources, fmt.Sprintf("%+v", q))
+	}
+
+	return fmt.Sprintf("Header: %+v\nQuestions: [%s]\nAnswers: [%s]\nAuthorities: [%s]\nResources [%s]",
+		p.Header,
+		strings.Join(qStr, ","),
+		strings.Join(answers, ","),
+		strings.Join(authorities, ","),
+		strings.Join(resources, ","),
+	)
 }
 
 func (p *DNSPacket) Read(buffer *BytePacketBuffer) error {
@@ -648,8 +682,8 @@ func (p *DNSPacket) Write(buffer *BytePacketBuffer) error {
 		}
 	}
 
-	for _, a := range p.Authorities {
-		_, err = a.Write(buffer)
+	for _, auth := range p.Authorities {
+		_, err = auth.Write(buffer)
 		if err != nil {
 			return errors.Wrap(err, "updating packet with authoritative answers")
 		}
@@ -663,6 +697,66 @@ func (p *DNSPacket) Write(buffer *BytePacketBuffer) error {
 	}
 
 	return nil
+}
+
+func (p *DNSPacket) GetRandomA() net.IP {
+	rand.Seed(time.Now().UnixNano())
+
+	aRecords := make([]*DNSRecord, 0)
+	for _, record := range p.Answers {
+		if record.QType == AQueryType {
+			aRecords = append(aRecords, record)
+		}
+	}
+
+	if len(aRecords) == 0 {
+		return nil
+	}
+
+	randRecord := aRecords[rand.Intn(len(aRecords))]
+	return randRecord.Addr
+}
+
+type DomainHostTuple []string
+
+func (p *DNSPacket) getNS(qname string) []DomainHostTuple {
+	domainHostTuple := make([]DomainHostTuple, 0)
+
+	for _, record := range p.Authorities {
+		if record.QType == NSQueryType && strings.HasSuffix(qname, record.Domain.String()) {
+			domainHostTuple = append(
+				domainHostTuple,
+				DomainHostTuple{
+					record.Domain.String(),
+					record.Host.String(),
+				})
+		}
+	}
+
+	return domainHostTuple
+}
+
+func (p *DNSPacket) GetResolverNS(qname string) net.IP {
+	// fmt.Printf("fetch resolved name servers for %s and dns packet: %+v\n", qname, p)
+	for _, tuple := range p.getNS(qname) {
+		for _, r := range p.Resources {
+			// fmt.Printf("qtype: %s; domain: %s; host: %s; addr: %s\n", r.QType, tuple[0], tuple[1], r.Addr)
+			if r.QType == AQueryType && tuple[1] == r.Domain.String() {
+				return r.Addr
+			}
+		}
+	}
+	return nil
+}
+
+func (p *DNSPacket) GetUnresolvedNS(qname string) string {
+	for _, tuple := range p.getNS(qname) {
+		if tuple[1] != "" {
+			return tuple[1]
+		}
+	}
+
+	return ""
 }
 
 func DNSPacketFromBuffer(buffer *BytePacketBuffer) (*DNSPacket, error) {
