@@ -53,7 +53,6 @@ func (r *DNSRecord) Read(buffer *bufHandler.BytePacketBuffer) error {
 	r.Domain = &domain
 
 	qtype_num, err := buffer.Read16()
-	fmt.Printf("Query Type: %s, Num: %d\n", QueryType(qtype_num), qtype_num)
 	if err != nil {
 		return errors.Wrap(err, "reading dns record query type")
 	}

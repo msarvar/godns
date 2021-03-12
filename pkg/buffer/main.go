@@ -27,14 +27,16 @@ func (n *DomainName) String() string {
 
 func NewBytePacketBuffer() *BytePacketBuffer {
 	return &BytePacketBuffer{
-		Buf: make([]uint8, 512),
-		pos: 0,
+		Buf:    make([]uint8, 512),
+		lookup: map[string]int{},
+		pos:    0,
 	}
 }
 
 type BytePacketBuffer struct {
-	Buf []uint8
-	pos int
+	Buf    []uint8
+	pos    int
+	lookup map[string]int
 }
 
 func (b *BytePacketBuffer) Pos() int {
@@ -270,7 +272,25 @@ func (b *BytePacketBuffer) Write32(value uint32) error {
 }
 
 func (b *BytePacketBuffer) WriteQname(qname *DomainName) error {
-	for _, label := range strings.Split(qname.str, ".") {
+	names := strings.Split(qname.str, ".")
+	size := len(names)
+	jumpPerformed := false
+
+	for i, label := range names {
+		searchLabel := strings.Join(names[i:size-1], ".")
+		if pos, ok := b.lookup[searchLabel]; ok {
+			jumpInst := uint16(pos) | 0xC000
+			err := b.Write16(jumpInst)
+			if err != nil {
+				return errors.Wrap(err, "writing jump instruction")
+			}
+			jumpPerformed = true
+			break
+		}
+
+		pos := b.Pos()
+		b.lookup[searchLabel] = pos
+
 		len := len(label)
 		if len > 0x3f {
 			return errors.New("single label exceeds 63 character of length")
@@ -289,9 +309,11 @@ func (b *BytePacketBuffer) WriteQname(qname *DomainName) error {
 		}
 	}
 
-	err := b.Write8(0)
-	if err != nil {
-		return errors.Wrap(err, "writing last byte")
+	if !jumpPerformed {
+		err := b.Write8(0)
+		if err != nil {
+			return errors.Wrap(err, "writing last byte")
+		}
 	}
 
 	return nil

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/msarvar/godns/pkg/buffer"
+	buf "github.com/msarvar/godns/pkg/buffer"
 	"github.com/pkg/errors"
 )
 
@@ -56,7 +56,7 @@ func (p *DNSPacket) String() string {
 	)
 }
 
-func (p *DNSPacket) Read(buffer *buffer.BytePacketBuffer) error {
+func (p *DNSPacket) Read(buffer *buf.BytePacketBuffer) error {
 	err := p.Header.Read(buffer)
 	if err != nil {
 		return errors.Wrap(err, "reading header")
@@ -106,6 +106,7 @@ func (p *DNSPacket) Read(buffer *buffer.BytePacketBuffer) error {
 			return errors.Wrap(err, "reading dns record resources")
 		}
 
+		fmt.Printf("%+v\n", rec)
 		resources = append(resources, &rec)
 	}
 	p.Resources = resources
@@ -113,7 +114,7 @@ func (p *DNSPacket) Read(buffer *buffer.BytePacketBuffer) error {
 	return nil
 }
 
-func (p *DNSPacket) Write(buffer *buffer.BytePacketBuffer) error {
+func (p *DNSPacket) Write(buffer *buf.BytePacketBuffer) error {
 	// Populating packet header with right array length for questions, answers,
 	// authEntries, and resourceEntries
 	p.Header.Questions = uint16(len(p.Questions))
@@ -128,6 +129,7 @@ func (p *DNSPacket) Write(buffer *buffer.BytePacketBuffer) error {
 
 	for _, q := range p.Questions {
 		err = q.Write(buffer)
+
 		if err != nil {
 			return errors.Wrap(err, "updating packet with questions")
 		}
@@ -215,7 +217,7 @@ func (p *DNSPacket) GetUnresolvedNS(qname string) string {
 	return ""
 }
 
-func DNSPacketFromBuffer(buffer *buffer.BytePacketBuffer) (*DNSPacket, error) {
+func DNSPacketFromBuffer(buffer *buf.BytePacketBuffer) (*DNSPacket, error) {
 	packet := NewDNSPacket()
 
 	err := packet.Read(buffer)
