@@ -1,4 +1,4 @@
-package pkg_test
+package dns_test
 
 import (
 	"io/ioutil"
@@ -7,15 +7,16 @@ import (
 
 	. "github.com/stretchr/testify/assert"
 
-	"github.com/msarvar/godns/pkg"
+	"github.com/msarvar/godns/pkg/buffer"
+	"github.com/msarvar/godns/pkg/dns"
 )
 
 func TestDNSPacket(t *testing.T) {
 	t.Run("creating request question", func(t *testing.T) {
 		packetBinary, _ := ioutil.ReadFile(filepath.Join("testfixtures", "query_packet.txt"))
-		buffer := pkg.NewBytePacketBuffer()
+		buffer := buffer.NewBytePacketBuffer()
 		buffer.Buf = packetBinary
-		packet := pkg.NewDNSPacket()
+		packet := dns.NewDNSPacket()
 		packet.Read(buffer)
 
 		Equal(t, uint16(44023), packet.Header.ID, "ID must match")

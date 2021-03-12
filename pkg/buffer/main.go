@@ -1,4 +1,4 @@
-package pkg
+package buffer
 
 import (
 	"fmt"
@@ -11,13 +11,18 @@ const (
 	MAX_JUMPS = 5
 )
 
-func BoolToUint8(value bool) uint8 {
-	var converted uint8
-	if value {
-		converted = 1
+func NewDomainName(qName string) *DomainName {
+	return &DomainName{
+		str: qName,
 	}
+}
 
-	return converted
+type DomainName struct {
+	str string
+}
+
+func (n *DomainName) String() string {
+	return n.str
 }
 
 func NewBytePacketBuffer() *BytePacketBuffer {
@@ -46,7 +51,7 @@ func (b *BytePacketBuffer) Seek(pos int) {
 
 func (b *BytePacketBuffer) Get(pos int) (uint8, error) {
 	if pos >= 512 {
-		return 0, errors.New("End of buffer")
+		return 0, errors.New("end of buffer")
 	}
 
 	return b.Buf[pos], nil
@@ -61,9 +66,16 @@ func (b *BytePacketBuffer) Set16(pos int, value uint16) {
 	b.Buf[pos+1] = uint8(value & 0xFF)
 }
 
+func (b *BytePacketBuffer) GetRangeAtPos() ([]uint8, error) {
+	if b.pos >= 512 {
+		return nil, errors.New("buffer overflow")
+	}
+	return b.Buf[0:b.pos], nil
+}
+
 func (b *BytePacketBuffer) GetRange(start int, len int) ([]uint8, error) {
 	if start+len >= 512 {
-		return nil, errors.New("End of buffer")
+		return nil, errors.New("buffer overflow")
 	}
 
 	return b.Buf[start : start+len], nil
@@ -71,7 +83,7 @@ func (b *BytePacketBuffer) GetRange(start int, len int) ([]uint8, error) {
 
 func (b *BytePacketBuffer) Read() (uint8, error) {
 	if b.pos >= 512 {
-		return 0, errors.New("end of buffer")
+		return 0, errors.New("buffer overflow")
 	}
 
 	res := b.Buf[b.pos]
@@ -100,21 +112,31 @@ func (b *BytePacketBuffer) Read16() (uint16, error) {
 }
 
 func (b *BytePacketBuffer) Read32() (uint32, error) {
-	f, err := b.Read16()
+	f, err := b.Read()
 	if err != nil {
 		return 0, err
 	}
 
-	s, err := b.Read16()
+	s, err := b.Read()
 	if err != nil {
 		return 0, err
 	}
 
-	res := uint32(f)<<16 | uint32(s)
+	t, err := b.Read()
+	if err != nil {
+		return 0, err
+	}
+
+	fth, err := b.Read()
+	if err != nil {
+		return 0, err
+	}
+
+	res := uint32(f)<<24 | uint32(s)<<16 | uint32(t)<<8 | uint32(fth)<<0
 	return res, nil
 }
 
-func (b *BytePacketBuffer) ReadQname(domainName *domainName) error {
+func (b *BytePacketBuffer) ReadQname(DomainName *DomainName) error {
 	pos := b.Pos()
 
 	jumped := false
@@ -153,7 +175,6 @@ func (b *BytePacketBuffer) ReadQname(domainName *domainName) error {
 			// Jump was performed and loop continues to next part
 			jumped = true
 			jumps_performed += 1
-
 			continue
 		} else {
 			pos += 1
@@ -162,12 +183,12 @@ func (b *BytePacketBuffer) ReadQname(domainName *domainName) error {
 				break
 			}
 
-			domainName.str = fmt.Sprintf("%s%s", domainName.str, delim)
+			DomainName.str = fmt.Sprintf("%s%s", DomainName.str, delim)
 			str_buffer, err := b.GetRange(pos, int(len))
 			if err != nil {
 				return errors.Wrap(err, "reading the label")
 			}
-			domainName.str = fmt.Sprintf("%s%s", domainName.str, str_buffer)
+			DomainName.str = fmt.Sprintf("%s%s", DomainName.str, str_buffer)
 
 			delim = "."
 
@@ -182,6 +203,7 @@ func (b *BytePacketBuffer) ReadQname(domainName *domainName) error {
 	return nil
 }
 
+// Write implements io.Writter interface.
 func (b *BytePacketBuffer) Write(p []byte) (n int, err error) {
 	for _, byte := range p {
 		pos := b.Pos()
@@ -212,12 +234,12 @@ func (b *BytePacketBuffer) Write8(value uint8) error {
 func (b *BytePacketBuffer) Write16(value uint16) error {
 	err := b.writePacketByte(uint8(value >> 8))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "writing first 8 bits of 16 bit")
 	}
 
 	err = b.writePacketByte(uint8(value & 0xFF))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "writing second 8 bits of 16 bit")
 	}
 
 	return nil
@@ -226,23 +248,28 @@ func (b *BytePacketBuffer) Write16(value uint16) error {
 func (b *BytePacketBuffer) Write32(value uint32) error {
 	err := b.writePacketByte(uint8((value >> 24) & 0xFF))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "writing first 8 bits of 32 bit")
 	}
 
 	err = b.writePacketByte(uint8((value >> 16) & 0xFF))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "writing second 8 bits of 32 bit")
 	}
 
 	err = b.writePacketByte(uint8((value >> 8) & 0xFF))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "writing third 8 bits of 32 bit")
 	}
 
-	return b.writePacketByte(uint8(value & 0xFF))
+	err = b.writePacketByte(uint8(value & 0xFF))
+	if err != nil {
+		return errors.Wrap(err, "writing fourth 8 bits of 32 bit")
+	}
+
+	return nil
 }
 
-func (b *BytePacketBuffer) WriteQname(qname *domainName) error {
+func (b *BytePacketBuffer) WriteQname(qname *DomainName) error {
 	for _, label := range strings.Split(qname.str, ".") {
 		len := len(label)
 		if len > 0x3f {
