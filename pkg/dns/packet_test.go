@@ -69,4 +69,29 @@ func TestDNSPacket(t *testing.T) {
 		}
 		Equal(t, 9, len(packet.Resources))
 	})
+
+	t.Run("write_NX_type_response", func(t *testing.T) {
+		packetBinary, err := ioutil.ReadFile(filepath.Join("../testfixtures", "response_NX_packet.txt"))
+		NoError(t, err, "failed read")
+		buffer := buffer.NewBytePacketBuffer()
+		buffer.Buf = packetBinary
+		packet := dns.NewDNSPacket()
+		packet.Read(buffer)
+
+		Equal(t, 1, int(packet.Header.Questions))
+		Equal(t, 0, int(packet.Header.Answers))
+		Equal(t, 1, int(packet.Header.AuthoritativeEntries))
+		Equal(t, 0, int(packet.Header.ResourceEntries))
+
+		Equal(t, "www.goa1o.com", packet.Questions[0].Name.String())
+		Equal(t, dns.QueryType(1), packet.Questions[0].QType)
+
+		Equal(t, 1, len(packet.Authorities))
+		for _, a := range packet.Authorities {
+			Equal(t, dns.SOAQueryType, a.QType)
+		}
+	})
+
+	// TODO: Add tests for other query types
+	// SOA, MX, NS, AAAA
 }

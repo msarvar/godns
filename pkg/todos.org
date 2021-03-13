@@ -1,0 +1,11 @@
+#+TITLE: Todos
+
+* Features
+** TODO Add better CLI command support
+** TODO Implement concurrency
+** TODO Implement DNS caching
+** TODO Implement DNS authority
+I want to be able to add my own domain names.
+** TODO Add TCP support
+** TODO Add DNSSEC support
+** TODO Run benchmarks
