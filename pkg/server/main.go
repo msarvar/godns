@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net"
+	"path/filepath"
 	"time"
 
 	"github.com/msarvar/godns/pkg/buffer"
@@ -124,6 +125,15 @@ func handleQuery(udpConn net.PacketConn, reqBuffer *buffer.BytePacketBuffer, add
 	request, err := dns.DNSPacketFromBuffer(reqBuffer)
 	logAndExitIfErr("Error: initializing response: %s\n", err)
 
+	// Uncomment for fixture generation
+	// d, _ := reqBuffer.GetRangeAtPos()
+	// requestFile := filepath.Join(
+	// 	"pkg",
+	// 	"testfixtures",
+	// 	fmt.Sprintf("query_%s_packet.txt", request.Questions[0].QType.String()),
+	// )
+	// ioutil.WriteFile(requestFile, d, 0666)
+
 	packet := dns.NewDNSPacket()
 	packet.Header.ID = request.Header.ID
 	packet.Header.RecursionDesired = true
@@ -168,11 +178,19 @@ func handleQuery(udpConn net.PacketConn, reqBuffer *buffer.BytePacketBuffer, add
 	data, err := resBuffer.GetRangeAtPos()
 	logAndExitIfErr("Error: generating dns response packet: %s\n", err)
 
+	// Uncomment for fixture generation
+	// responseFile := filepath.Join(
+	// 	"pkg",
+	// 	"testfixtures",
+	// 	fmt.Sprintf("response_%s_packet.txt", packet.Questions[0].QType.String()),
+	// )
+	// ioutil.WriteFile(responseFile, data, 0666)
+
 	_, err = udpConn.WriteTo(data, addr)
 	logAndExitIfErr("Error: sending response: %s\n", err)
 }
 
-func Start(ctx context.Context) {
+func Serve(ctx context.Context) {
 	// ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	// defer cancel()
 	udpConn, err := net.ListenPacket("udp", ":2053")

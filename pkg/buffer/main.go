@@ -138,7 +138,7 @@ func (b *BytePacketBuffer) Read32() (uint32, error) {
 	return res, nil
 }
 
-func (b *BytePacketBuffer) ReadQname(DomainName *DomainName) error {
+func (b *BytePacketBuffer) ReadQname(qname *DomainName) error {
 	pos := b.Pos()
 
 	jumped := false
@@ -185,12 +185,12 @@ func (b *BytePacketBuffer) ReadQname(DomainName *DomainName) error {
 				break
 			}
 
-			DomainName.str = fmt.Sprintf("%s%s", DomainName.str, delim)
+			qname.str = fmt.Sprintf("%s%s", qname.str, delim)
 			str_buffer, err := b.GetRange(pos, int(len))
 			if err != nil {
 				return errors.Wrap(err, "reading the label")
 			}
-			DomainName.str = fmt.Sprintf("%s%s", DomainName.str, str_buffer)
+			qname.str = fmt.Sprintf("%s%s", qname.str, str_buffer)
 
 			delim = "."
 

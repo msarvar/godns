@@ -240,24 +240,11 @@ func (r *DNSRecord) Write(buffer *bufHandler.BytePacketBuffer) (int, error) {
 		}
 
 		addrRaw := r.Addr.To4()
-		err = buffer.Write8(addrRaw[0])
-		if err != nil {
-			return 0, errors.Wrap(err, "reading first byte of dns record ip")
-		}
-
-		err = buffer.Write8(addrRaw[1])
-		if err != nil {
-			return 0, errors.Wrap(err, "reading second byte of dns record ip")
-		}
-
-		err = buffer.Write8(addrRaw[2])
-		if err != nil {
-			return 0, errors.Wrap(err, "reading third byte of dns record ip")
-		}
-
-		err = buffer.Write8(addrRaw[3])
-		if err != nil {
-			return 0, errors.Wrap(err, "reading fourth byte of dns record ip")
+		for _, i := range addrRaw {
+			err = buffer.Write8(i)
+			if err != nil {
+				return 0, errors.Wrap(err, "setting byte of dns record ip")
+			}
 		}
 	case NSQueryType:
 		pos := buffer.Pos()

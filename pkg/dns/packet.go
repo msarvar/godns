@@ -106,7 +106,6 @@ func (p *DNSPacket) Read(buffer *buf.BytePacketBuffer) error {
 			return errors.Wrap(err, "reading dns record resources")
 		}
 
-		fmt.Printf("%+v\n", rec)
 		resources = append(resources, &rec)
 	}
 	p.Resources = resources
